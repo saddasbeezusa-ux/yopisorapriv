@@ -96,8 +96,12 @@ export async function analyzeVideo(file, { maxSeconds = 20 } = {}) {
 
 export async function trimVideo(file, sceneStart) {
   const out = join(tmpdir(), `ab-trim-${randomBytes(8).toString('hex')}.mp4`);
+  // -threads 2: without a cap x264 spawns one thread per core (22+ on Railway),
+  // and the encode-time allocation blows past the container's memory limit —
+  // the kernel kills ffmpeg mid-encode and the trim "fails".
   await ffRun([
     '-y', '-hide_banner', '-nostats',
+    '-threads', '2',
     '-ss', String(Math.max(0, sceneStart)),
     '-i', file,
     '-c:v', 'libx264', '-preset', 'veryfast',
