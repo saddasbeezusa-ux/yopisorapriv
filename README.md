@@ -36,25 +36,26 @@ A single-server Discord bot: `/flux-3`, `/sd2`, `/sd2-5`, `/wan-3` and `/autobyp
 - Audio is always on. Renders over 99% of the server upload limit are
   compressed slightly (to ~98%) so they still attach.
 
-`/autobypass` — fires 4 Seedance 2.5 renders (30s • 16:9) of the prompt template
+`/autobypass` — fires 4 Seedance 2.0 renders (15s • 16:9) of the prompt template
 with `videointro.mov` attached as the reference video, trims the intro off
-every render, then replies to the initial message with one embeddable link per
-clip (hosted on catbox.moe, wrapped through x266.mov so Discord plays them
+every render, then replies to the initial message with one embeddable link
+per clip (hosted on catbox.moe, wrapped through x266.mov so Discord plays them
 inline).
 - `prompt` (required) — the scene the video should cut to after the intro
-- `resolution` — 480p (default), 720p
 - `img1`–`img3` — optional reference images (passed as references)
 - If every render is a content violation: "All videos were content violation,
   try again".
 - The batch is persisted right after the submits, so a restart mid-batch
   resumes on next boot (re-polls every render, trims, delivers).
 - The intro clip is auto-padded to the provider's 1.8s reference minimum.
+- The scene cut is detected with ffmpeg scene-change scores, with a luminance
+  fallback.
 
 ## Setup
 
 1. `npm install`
-2. Fill `.env`: `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_GUILD_ID`,
-   `ARK_API_KEY` (used by `/autobypass`); `/sd2`, `/sd2-5` and `/wan-3` need no key
+2. Fill `.env`: `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_GUILD_ID`.
+   No API keys needed — every command runs on shared internal providers.
 3. `npm run register`
 4. `npm start`
 

@@ -163,18 +163,14 @@ const wan3Builder = new SlashCommandBuilder()
 
 /**
  * /autobypass \u2014 fires 4 Seedance 2.5 renders (30s) of the prompt template with
- * the intro clip as the reference video, trims the intro off every render and
- * delivers each as an embeddable link.
+ * the intro clip as the reference video, trims the intro off every
+ * render and delivers each as an embeddable link.
  */
 const autobypassBuilder = new SlashCommandBuilder()
   .setName('autobypass')
   .setDescription('Fire 4 renders of your prompt and deliver them intro-trimmed as links')
   .addStringOption((o) =>
     o.setName('prompt').setDescription('The scene the video should cut to after the intro').setRequired(true).setMaxLength(3000),
-  )
-  .addStringOption((o) =>
-    o.setName('resolution').setDescription(`Output resolution (default 480p)`)
-      .addChoices(...['480p', '720p'].map((r) => ({ name: r === '480p' ? `${r} (default)` : r, value: r }))),
   )
   .addAttachmentOption((o) => o.setName('img1').setDescription(`Reference image (optional, up to 3) \u2014 passed as a reference, not a first frame`))
   .addAttachmentOption((o) => o.setName('img2').setDescription('A second reference image (optional)'))

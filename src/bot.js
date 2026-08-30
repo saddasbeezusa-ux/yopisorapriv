@@ -40,7 +40,7 @@ import {
   SD25_MAX_IMAGES,
   SD25_MAX_VIDEOS,
 } from './sd2.js';
-import { ArkClient, ArkError, ARK_MODEL } from './ark.js';
+import { OpenGenClient, OpenGenError, OPENGEN_MODEL } from './opengen.js';
 import { analyzeVideo, trimVideo, ensureMinDuration, AutoBypassError } from './autobypass.js';
 import {
   WanClient,
@@ -57,7 +57,6 @@ import { uploadToCatbox } from './catbox.js';
 const {
   DISCORD_TOKEN,
   DISCORD_GUILD_ID,
-  ARK_API_KEY,
   GEN_POLL_INTERVAL_MS = '15000',
   GEN_VIDEO_TIMEOUT_MS = '1200000',
   GEN_MAX_CONCURRENT_PER_USER = '3',
@@ -71,16 +70,12 @@ if (!DISCORD_GUILD_ID) {
   console.error('DISCORD_GUILD_ID is missing. The bot is restricted to a single server.');
   process.exit(1);
 }
-if (!ARK_API_KEY) {
-  console.error('ARK_API_KEY is missing. Fill it in .env (required for /autobypass).');
-  process.exit(1);
-}
 
 const flux = new FluxClient();
 const sd2 = new SeedanceClient({ model: SD2_MODEL });
 const sd25 = new SeedanceClient({ model: SD25_MODEL });
 const wan = new WanClient();
-const ark = new ArkClient({ model: ARK_MODEL });
+const ogen = new OpenGenClient();
 const jobStore = createJobStore({ dir: process.env.GEN_JOB_STORE_DIR || './.jobs' });
 
 const safeUnlink = (p) => (p ? unlink(p).catch(() => {}) : Promise.resolve());
@@ -133,7 +128,7 @@ const UNLIMITED_USER_IDS = new Set(
 );
 const isUnlimited = (userId) => UNLIMITED_USER_IDS.has(String(userId));
 
-// User who gets the multi-generation flow on /sd2 (modal â†’ fire N gens).
+// User who gets the multi-generation flow on /sd2 (modal Ã¢â€ â€™ fire N gens).
 const SD2_MULTI_USER_ID = '1242996784301740032';
 const isSd2MultiUser = (userId) => String(userId) === SD2_MULTI_USER_ID;
 
@@ -196,11 +191,11 @@ client.once('clientReady', async (c) => {
   console.log(`Logged in as ${c.user.tag}`);
   console.log(`Server: ${DISCORD_GUILD_ID} (locked)`);
   console.log(`Limit:  ${MAX_PER_USER} concurrent per user (cleared on restart)`);
-  c.user.setActivity('/flux-3 â€¢ /sd2', { type: ActivityType.Listening });
+  c.user.setActivity('/flux-3 Ã¢â‚¬Â¢ /sd2', { type: ActivityType.Listening });
   resumePendingJobs().catch((err) => console.error('Resume sweep failed:', err));
 });
 
-// Periodic memory trace — makes a slow leak visible in Railway logs before the
+// Periodic memory trace â€” makes a slow leak visible in Railway logs before the
 // cgroup OOM-kill strikes, instead of only seeing "Killed" with no context.
 const MEM_MB = 1024 * 1024;
 setInterval(() => {
@@ -208,7 +203,7 @@ setInterval(() => {
   console.log(`[mem] rss ${(m.rss / MEM_MB).toFixed(0)} MB | heap ${(m.heapUsed / MEM_MB).toFixed(0)}/${(m.heapTotal / MEM_MB).toFixed(0)} MB | external ${(m.external / MEM_MB).toFixed(0)} MB`);
 }, 5 * 60_000).unref();
 
-// â”€â”€â”€ Shared helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Shared helpers Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 function makeAnchorFns({ interaction = null, channel = null, hidePrompt = false } = {}) {
   let anchor = null;
@@ -220,7 +215,7 @@ function makeAnchorFns({ interaction = null, channel = null, hidePrompt = false 
   };
 
   // hidePrompt: the prompt never appears in any message. Cards get their
-  // description stripped on the way out — including error cards and anything
+  // description stripped on the way out â€” including error cards and anything
   // sent as a raw reply body.
   const stripPrompt = (embed) => {
     if (!hidePrompt || !embed) return embed;
@@ -264,7 +259,7 @@ function makeAnchorFns({ interaction = null, channel = null, hidePrompt = false 
     catch (err) {
       console.warn(`Could not reply to anchor: ${err.message}`);
       if (hasFiles && await alreadyDelivered()) {
-        console.log('Delivery already landed despite the error — not sending again.');
+        console.log('Delivery already landed despite the error â€” not sending again.');
         return;
       }
     }
@@ -433,7 +428,7 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.commandName === 'autobypass') return runAutoBypass(interaction);
 });
 
-// â”€â”€â”€ /sd2 multi-fire (user 1242996784301740032 only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ /sd2 multi-fire (user 1242996784301740032 only) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 // Modal asks how many to fire. Same prompt + references go on every request.
 // Submit is pooled so 100 gens don't open 100 sockets at once.
 
@@ -476,7 +471,7 @@ async function promptSd2Multi(interaction) {
           .setRequired(true)
           .setMinLength(1)
           .setMaxLength(3)
-          .setPlaceholder(`1â€“${SD2_MULTI_MAX}`),
+          .setPlaceholder(`1Ã¢â‚¬â€œ${SD2_MULTI_MAX}`),
       ),
     );
 
@@ -497,7 +492,7 @@ async function handleSd2MultiModal(interaction) {
   const pending = pendingSd2Multi.get(user.id);
   pendingSd2Multi.delete(user.id);
   if (!pending || pending.expiresAt < Date.now()) {
-    await interaction.reply({ content: 'That request expired â€” run /sd2 again.', flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: 'That request expired Ã¢â‚¬â€ run /sd2 again.', flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -591,7 +586,7 @@ async function handleSd2MultiModal(interaction) {
     return;
   }
 
-  // Each render is independent â€” one failure must not cancel the rest.
+  // Each render is independent Ã¢â‚¬â€ one failure must not cancel the rest.
   await runPool(submitted.length, SD2_MULTI_DELIVER_CONCURRENCY, async (idx) => {
     const item = submitted[idx];
     const idRef = { value: item.taskId };
@@ -652,19 +647,19 @@ async function handleSd2MultiModal(interaction) {
     .setFooter({ text: `Requested by ${user.username}`, iconURL: user.displayAvatarURL() })
     .setTimestamp());
 }
-// â”€â”€â”€ /autobypass (Volcengine ARK, doubao Seedance 2.5) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
 // Fires 4 renders of the prompt template with the intro clip as the reference
 // video, trims the intro off every render, and delivers each as an
 // embeddable link.
 
 const AB_ROOT_DIR = dirname(fileURLToPath(import.meta.url)) + '/..';
 const AB_INTRO_PATH = process.env.AUTOBYPASS_INTRO_PATH || join(AB_ROOT_DIR, 'videointro.mov');
-const AB_COUNT = 4;
+// Renders fired per /autobypass run — configurable in .env (AUTOBYPASS_COUNT).
+const AB_COUNT = Math.min(10, Math.max(1, Number.parseInt(process.env.AUTOBYPASS_COUNT, 10) || 4));
 const AB_MAX_IMAGES = 3;
 const AB_SUBMIT_CONCURRENCY = 5;
 const AB_DELIVER_CONCURRENCY = 5;
-const AB_DURATION = 30;
-const AB_RESOLUTION = '480p';
+const AB_DURATION = 15;
 const AB_RATIO = '16:9';
 const AB_PROMPT_TEMPLATE = (userPrompt) =>
   `a X mask hovering in a white void for 0.2 seconds, then at the 0.3 second mark then the video instantly cuts to ${userPrompt} [refrence Video 1 for how long X mask stays on screen when video turns black that's when cut starts]`;
@@ -672,30 +667,21 @@ const abModelLabel = (modelId) => (String(modelId).includes('2-5') ? 'Seedance 2
 const abSettingsLine = (duration, count, modelLabel, extra = []) =>
   [`\`${duration}s\``, `\`${AB_RATIO}\``, `\`${count} render${count === 1 ? '' : 's'}\``, `\`${modelLabel}\``, ...extra].join(' \u2022 ');
 
-// The intro clip padded to the provider's r2v minimum (1.8s). Per session it is
-// posted once to the staging channel (AUTOBYPASS_LOGS_CHANNEL_ID from .env) and
-// the resulting Discord attachment URL rides into ARK as the reference video —
-// no separate upload step.
-const AB_LOGS_CHANNEL_ID = process.env.AUTOBYPASS_LOGS_CHANNEL_ID || '';
-let abRefVideoUrl = process.env.AUTOBYPASS_REF_VIDEO_URL || null;
+// The intro clip padded to the provider's r2v minimum (1.8s), then uploaded to
+// the provider once per process â€” every render references that hosted copy.
+let abRefStoredFile = null;
 let abRefUploadPromise = null;
-async function ensureRefVideoUrl() {
-  if (abRefVideoUrl) return abRefVideoUrl;
+async function ensureRefStoredFile() {
+  if (abRefStoredFile) return abRefStoredFile;
   if (!abRefUploadPromise) {
     abRefUploadPromise = (async () => {
       const padded = await ensureMinDuration(AB_INTRO_PATH, 1.8);
       try {
-        if (!AB_LOGS_CHANNEL_ID) throw new AutoBypassError('AUTOBYPASS_LOGS_CHANNEL_ID is not set.');
-        const ch = await client.channels.fetch(AB_LOGS_CHANNEL_ID);
-        if (!ch?.send) throw new AutoBypassError('The reference clip could not be staged (channel missing).');
-        const msg = await ch.send({
-          files: [new AttachmentBuilder(createReadStream(padded), { name: 'videointro.mov' })],
+        abRefStoredFile = await ogen.uploadReferenceFile({
+          path: padded, name: 'videointro.mov', contentType: 'video/quicktime',
         });
-        const att = msg.attachments.first();
-        if (!att) throw new AutoBypassError('Could not upload the intro reference clip.');
-        abRefVideoUrl = att.url;
-        console.log(`[autobypass] intro clip staged in channel ${AB_LOGS_CHANNEL_ID}`);
-        return abRefVideoUrl;
+        console.log('[autobypass] intro clip hosted at the provider');
+        return abRefStoredFile;
       } finally {
         if (padded !== AB_INTRO_PATH) await unlink(padded).catch(() => {});
       }
@@ -709,7 +695,7 @@ async function ensureRefVideoUrl() {
 // embeddable link per clip. Used by both the fresh run and restart-resume.
 async function finishAutoBypass({
   user, prompt, guild, successes, violations, failed, total, startedAt,
-  duration = AB_DURATION, resolution = AB_RESOLUTION, modelLabel = 'Seedance 2.5',
+  duration = AB_DURATION, modelLabel = 'Seedance 2',
   finalise, replyToAnchor, localFiles,
 }) {
   const commandName = 'Auto Bypass';
@@ -721,7 +707,7 @@ async function finishAutoBypass({
         .setAuthor({ name: commandName })
         .setTitle('All videos were content violation, try again')
         .setDescription(`>>> ${truncate(prompt, 900)}`)
-        .addFields({ name: 'Settings', value: abSettingsLine(duration, total, modelLabel, [`\`${resolution}\``]) })
+        .addFields({ name: 'Settings', value: abSettingsLine(duration, total, modelLabel) })
         .setFooter({ text: `Requested by ${user.username}`, iconURL: user.displayAvatarURL?.() })
         .setTimestamp());
     } else {
@@ -769,7 +755,7 @@ async function finishAutoBypass({
         deliverPath = trimmedPath;
         trimmedOk = true;
       } catch (err) {
-        console.error(`[autobypass] trim render ${s.i + 1} failed: ${err?.message ?? err} — delivering untrimmed`);
+        console.error(`[autobypass] trim render ${s.i + 1} failed: ${err?.message ?? err} â€” delivering untrimmed`);
       }
     }
     const statRes = await stat(deliverPath).catch(() => null);
@@ -794,7 +780,7 @@ async function finishAutoBypass({
     } catch (err) {
       console.error(`[autobypass] clip ${c.i + 1} catbox upload failed: ${err?.message ?? err}`);
     }
-    // catbox failed — attach the file if it fits the server limit.
+    // catbox failed â€” attach the file if it fits the server limit.
     if (c.bytes < limit) {
       try {
         await replyToAnchor({ content: `${user}`, files: [new AttachmentBuilder(createReadStream(c.path), { name: `autobypass-${c.i + 1}.mp4` })] });
@@ -817,7 +803,7 @@ async function finishAutoBypass({
     .setTitle(delivered ? 'Bypass complete' : 'Bypass failed')
     .setDescription(`>>> ${truncate(prompt, 900)}`)
     .addFields(
-      { name: 'Settings', value: abSettingsLine(duration, total, modelLabel, [`\`${resolution}\``, `\`${fmtElapsed(Date.now() - startedAt)}\``]) },
+      { name: 'Settings', value: abSettingsLine(duration, total, modelLabel, [`\`${fmtElapsed(Date.now() - startedAt)}\``]) },
       { name: 'Delivered', value: `${delivered} of ${total} renders \u2014 links above` },
       { name: 'Trim', value: trimSummary || 'No clips to trim' },
     )
@@ -856,10 +842,9 @@ async function runAutoBypass(interaction) {
 
   try {
     const userPrompt = interaction.options.getString('prompt', true);
-    const modelId = ARK_MODEL;
+    const modelId = OPENGEN_MODEL;
     const abDuration = AB_DURATION;
     const abCount = AB_COUNT;
-    const abResolution = interaction.options.getString('resolution') ?? AB_RESOLUTION;
     const modelLabel = abModelLabel(modelId);
 
     const { images: imgAtts, error: refError } = collectReferences(
@@ -876,21 +861,15 @@ async function runAutoBypass(interaction) {
       .setAuthor({ name: commandName })
       .setTitle(`Firing ${abCount} bypass renders`)
       .setDescription(`>>> ${truncate(userPrompt, 900)}`)
-      .addFields({ name: 'Settings', value: abSettingsLine(abDuration, abCount, modelLabel, [`\`${abResolution}\``]) })
+      .addFields({ name: 'Settings', value: abSettingsLine(abDuration, abCount, modelLabel) })
       .setFooter({ text: `Requested by ${user.username} \u2022 submitting\u2026`, iconURL: user.displayAvatarURL() })
       .setTimestamp();
-    if (refCount) {
-      firing.addFields({ name: 'References', value: `${refCount} image${refCount > 1 ? 's' : ''}` });
-      firing.setThumbnail(imgAtts[0].url);
-    }
+    if (refCount) firing.addFields({ name: 'References', value: `${refCount} image${refCount > 1 ? 's' : ''}` });
+    if (refCount) firing.setThumbnail(imgAtts[0].url);
     const anchor = await createAnchor(firing);
 
-    const refUrl = await ensureRefVideoUrl();
     const finalPrompt = AB_PROMPT_TEMPLATE(userPrompt);
-    const references = [
-      { type: 'video', url: refUrl },
-      ...(imgAtts ?? []).map((a) => ({ type: 'image', url: a.url })),
-    ];
+    const refStored = await ensureRefStoredFile();
 
     const submitted = [];
     let submitBlocked = 0;
@@ -898,12 +877,12 @@ async function runAutoBypass(interaction) {
 
     await runPool(abCount, AB_SUBMIT_CONCURRENCY, async (i) => {
       try {
-        const { taskId } = await ark.createTask({
+        const { taskId } = await ogen.createTask({
           prompt: finalPrompt,
           duration: abDuration,
-          resolution: abResolution,
           ratio: AB_RATIO,
-          references,
+          images: imgAtts ?? [],
+          videos: [refStored],
         });
         submitted.push({ i, taskId });
       } catch (err) {
@@ -920,7 +899,7 @@ async function runAutoBypass(interaction) {
           .setAuthor({ name: commandName })
           .setTitle('All videos were content violation, try again')
           .setDescription(`>>> ${truncate(userPrompt, 900)}`)
-          .addFields({ name: 'Settings', value: abSettingsLine(abDuration, abCount, modelLabel, [`\`${abResolution}\``]) })
+          .addFields({ name: 'Settings', value: abSettingsLine(abDuration, abCount, modelLabel) })
           .setFooter({ text: `Requested by ${user.username}`, iconURL: user.displayAvatarURL() })
           .setTimestamp());
       } else {
@@ -948,7 +927,6 @@ async function runAutoBypass(interaction) {
         count: abCount,
         duration: abDuration,
         model: modelId,
-        resolution: abResolution,
         hide: hidePrompt,
         deadlineAt: Date.now() + VIDEO_TIMEOUT,
         createdAt: Date.now(),
@@ -978,10 +956,10 @@ async function runAutoBypass(interaction) {
     await runPool(submitted.length, AB_DELIVER_CONCURRENCY, async (idx) => {
       const item = submitted[idx];
       try {
-        const { videoUrl } = await ark.waitForTask(item.taskId, {
+        const { videoUrl } = await ogen.waitForTask(item.taskId, {
           intervalMs: POLL_MS, timeoutMs: VIDEO_TIMEOUT, onUpdate: () => {},
         });
-        const file = await ark.downloadFile(videoUrl);
+        const file = await ogen.downloadTaskResult(item.taskId, { firstUrl: videoUrl });
         localFiles.push(file.path);
         successes.push({ i: item.i, path: file.path, bytes: file.bytes });
         console.log(`[autobypass] ${item.taskId} (${item.i + 1}/${submitted.length}) rendered (${(file.bytes / MB).toFixed(1)} MB)`);
@@ -1033,7 +1011,7 @@ async function resumeAutoBypass(rec, { user, prompt, channel, finalise, replyToA
     const remaining = (rec.deadlineAt ?? 0) - Date.now();
     if (remaining <= 0) {
       await handleGenerationError(
-        new ArkError(`Generation timed out after ${Math.max(1, Math.round(VIDEO_TIMEOUT / 60_000))} minutes.`, { timedOut: true }),
+        new OpenGenError(`Generation timed out after ${Math.max(1, Math.round(VIDEO_TIMEOUT / 60_000))} minutes.`, { timedOut: true }),
         { finalise, replyToAnchor, prompt, user: resumeRef, idRef: { value: null }, commandName: 'Auto Bypass', idLabel: 'ID' },
       );
       return;
@@ -1058,10 +1036,10 @@ async function resumeAutoBypass(rec, { user, prompt, channel, finalise, replyToA
     await runPool(taskIds.length, AB_DELIVER_CONCURRENCY, async (idx) => {
       const taskId = taskIds[idx];
       try {
-        const { videoUrl } = await ark.waitForTask(taskId, {
+        const { videoUrl } = await ogen.waitForTask(taskId, {
           intervalMs: POLL_MS, timeoutMs: remaining, onUpdate: () => {},
         });
-        const file = await ark.downloadFile(videoUrl);
+        const file = await ogen.downloadTaskResult(taskId, { firstUrl: videoUrl });
         localFiles.push(file.path);
         successes.push({ i: idx, path: file.path, bytes: file.bytes });
         console.log(`[autobypass-resume] ${taskId} (${idx + 1}/${taskIds.length}) rendered`);
@@ -1077,8 +1055,7 @@ async function resumeAutoBypass(rec, { user, prompt, channel, finalise, replyToA
       successes, violations, failed, total: taskIds.length,
       startedAt: rec.createdAt ?? Date.now(),
       duration: rec.duration ?? AB_DURATION,
-      resolution: rec.resolution ?? AB_RESOLUTION,
-      modelLabel: abModelLabel(rec.model ?? ARK_MODEL),
+      modelLabel: abModelLabel(rec.model ?? OPENGEN_MODEL),
       finalise, replyToAnchor, localFiles,
     });
   } catch (err) {
@@ -1097,7 +1074,7 @@ async function resumeAutoBypass(rec, { user, prompt, channel, finalise, replyToA
 }
 
 
-// â”€â”€â”€ /sd2 generation handler (Seedance 2.0 via Volcengine ARK) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ /sd2 generation handler (Seedance 2.0 via Volcengine ARK) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 async function runSd2Generation(interaction) {
   const commandName = 'Seedance 2.0';
@@ -1260,7 +1237,7 @@ async function runSd2Generation(interaction) {
 }
 
 
-// ─── /sd2-5 generation handler (Seedance 2.5) ────────────────────────────────
+// â”€â”€â”€ /sd2-5 generation handler (Seedance 2.5) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Reference images and video are uploaded to the proxy and passed as
 // reference_images / reference_videos.
 
@@ -1419,8 +1396,8 @@ async function runSd25Generation(interaction) {
   }
 }
 
-// ─── /wan-3 generation handler (WAN 3.0) ─────────────────────────────────────
-// Resolution rides as parameters.resolution ('480P'/'720P') — native output, no
+// â”€â”€â”€ /wan-3 generation handler (WAN 3.0) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Resolution rides as parameters.resolution ('480P'/'720P') â€” native output, no
 // SR upscaling. Aspect is prompt-driven (", 16:9 ratio" suffix). Reference images
 // are uploaded to the proxy's OSS and passed as input.media reference images.
 
@@ -1519,7 +1496,7 @@ async function runWanGeneration(interaction) {
         file = await wan.compressToFit(file, targetBytes);
         compressed = true;
       } catch (err) {
-        console.error(`[wan] compression failed (${err?.message ?? err}) — falling back to over-limit notice`);
+        console.error(`[wan] compression failed (${err?.message ?? err}) â€” falling back to over-limit notice`);
       }
     }
     try {
@@ -1574,7 +1551,7 @@ async function runWanGeneration(interaction) {
   }
 }
 
-// ─── /flux-3 generation handler ──────────────────────────────────────────────
+// â”€â”€â”€ /flux-3 generation handler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Each run spins up a disposable Synthesia account (temp.tf email -> Cognito
 // signup -> email code -> freemium credits), generates FLUX 3, then downloads it.
 
@@ -1618,7 +1595,7 @@ async function runFluxGeneration(interaction) {
       .setTimestamp();
     const anchor = await createAnchor(preparing);
 
-    // Disposable account + workspace + freemium credits. Retry once — signup can
+    // Disposable account + workspace + freemium credits. Retry once â€” signup can
     // transiently fail (temp email allocation / verification code hiccups).
     let session = null;
     for (let attempt = 1; attempt <= 2; attempt++) {
@@ -1634,7 +1611,7 @@ async function runFluxGeneration(interaction) {
     const assetId = await flux.generate(session, { prompt, duration, ratio });
     idRef.value = assetId;
 
-    // The generation id now exists â€” flip the card to "Generating your video".
+    // The generation id now exists Ã¢â‚¬â€ flip the card to "Generating your video".
     await finalise(new EmbedBuilder()
       .setColor(COLOR_WORKING)
       .setAuthor({ name: commandName })
@@ -1725,7 +1702,7 @@ async function runFluxGeneration(interaction) {
   }
 }
 
-// â”€â”€â”€ Resume after a restart â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Resume after a restart Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 // Jobs are persisted the moment the task is submitted, so a crash / OOM-kill /
 // deploy mid-render doesn't lose them: on boot we re-poll each task by its id and
 // deliver the result to the original message.
@@ -1763,7 +1740,7 @@ async function resumeOne(rec) {
   const { finalise, replyToAnchor, setAnchor } = makeAnchorFns({ channel, hidePrompt: Boolean(rec.hide) });
   setAnchor(anchor);
 
-  // The outcome already reached the user before a previous shutdown — never
+  // The outcome already reached the user before a previous shutdown â€” never
   // deliver a second copy.
   if (rec.delivered) {
     console.log(`Resume ${rec.jobId}: already delivered before the restart; dropping.`);
@@ -1777,7 +1754,7 @@ async function resumeOne(rec) {
   if (rec.kind === 'wan') return resumeWan(rec, { user, prompt, channel, finalise, replyToAnchor });
   if (rec.kind === 'autobypass') return resumeAutoBypass(rec, { user, prompt, channel, finalise, replyToAnchor });
 
-  // Unknown / removed provider — cannot resume; drop it.
+  // Unknown / removed provider â€” cannot resume; drop it.
   console.warn(`Resume ${rec.jobId}: unsupported kind '${rec.kind ?? 'legacy'}', dropping.`);
   await jobStore.remove(rec.jobId);
 }
@@ -1849,7 +1826,7 @@ async function resumeFlux(rec, { user, prompt, channel, finalise, replyToAnchor 
   }
 }
 
-// â”€â”€â”€ Resilience â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Resilience Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 client.on('error', (err) => console.error('Client error:', err));
 client.on('shardError', (err) => console.error('Shard websocket error:', err));
 client.on('shardDisconnect', (event, id) =>
