@@ -702,7 +702,11 @@ async function ensureRefVideoUrl25() {
   if (abRefVideoUrl25) return abRefVideoUrl25;
   if (!abRefVideoPromise25) {
     abRefVideoPromise25 = (async () => {
-      const padded = await ensureMinDuration(AB_INTRO_PATH, 1.8);
+      // 2.5 reference-video assets require >=1.9s (upstream CreateAsset rejects
+      // shorter clips with InvalidParameter.DurationTooShort; 1.8s fails,
+      // 1.9s is the shortest accepted — verified by probe). Mask stays at the
+      // start; the black tail after it is the cut cue the template refers to.
+      const padded = await ensureMinDuration(AB_INTRO_PATH, 1.9);
       try {
         // Litterbox 500s on .mov uploads — the padded clip is H.264/AAC, so it
         // rides as .mp4 (players and ARK probe the container anyway).
