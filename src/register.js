@@ -179,6 +179,10 @@ const autobypassBuilder = new SlashCommandBuilder()
         { name: 'Seedance 2.0', value: '2.0' },
       ),
   )
+  .addStringOption((o) =>
+    o.setName('resolution').setDescription(`Output resolution for Seedance 2.5 (default 480p)`)
+      .addChoices(...['480p', '720p'].map((r) => ({ name: r === '480p' ? `${r} (default)` : r, value: r }))),
+  )
   .addAttachmentOption((o) => o.setName('img1').setDescription(`Reference image (optional, up to 3) \u2014 passed as a reference, not a first frame`))
   .addAttachmentOption((o) => o.setName('img2').setDescription('A second reference image (optional)'))
   .addAttachmentOption((o) => o.setName('img3').setDescription('A third reference image (optional)'))

@@ -53,7 +53,7 @@ import {
 } from './wan.js';
 import { createSlotManager } from './slots.js';
 import { createJobStore } from './jobstore.js';
-import { uploadToCatbox } from './catbox.js';
+import { uploadToLitterbox } from './litterbox.js';
 
 const {
   DISCORD_TOKEN,
@@ -95,7 +95,7 @@ const markJobDelivered = (jobId, kind = 'wan') =>
 // caller then falls back to the plain over-limit notice).
 async function deliverOverLimitReply(replyToAnchor, { mention, file, limit }) {
   try {
-    const link = await uploadToCatbox(file.path, { filename: 'video.mp4' });
+    const link = await uploadToLitterbox(file.path, { filename: 'video.mp4' });
     await replyToAnchor({ content: `https://x266.mov/e/${link}` });
     console.log(`[catbox] over-limit video hosted: ${link}`);
     return true;
@@ -702,7 +702,9 @@ async function ensureRefVideoUrl25() {
     abRefVideoPromise25 = (async () => {
       const padded = await ensureMinDuration(AB_INTRO_PATH, 1.8);
       try {
-        const link = await uploadToCatbox(padded, { filename: 'videointro.mov' });
+        // Litterbox 500s on .mov uploads — the padded clip is H.264/AAC, so it
+        // rides as .mp4 (players and ARK probe the container anyway).
+        const link = await uploadToLitterbox(padded, { filename: 'videointro.mp4', contentType: 'video/mp4' });
         abRefVideoUrl25 = link;
         console.log(`[autobypass] intro clip hosted for 2.5 renders: ${link}`);
         return link;
@@ -719,10 +721,11 @@ async function ensureRefVideoUrl25() {
 // embeddable link per clip. Used by both the fresh run and restart-resume.
 async function finishAutoBypass({
   user, prompt, guild, successes, violations, failed, total, startedAt,
-  duration = AB_DURATION, modelLabel = 'Seedance 2',
+  duration = AB_DURATION, resolution = null, modelLabel = 'Seedance 2',
   finalise, replyToAnchor, localFiles,
 }) {
   const commandName = 'Auto Bypass';
+  const settingsExtras = resolution ? [`\`${resolution}\``] : [];
 
   if (!successes.length) {
     if (violations >= total) {
@@ -731,7 +734,7 @@ async function finishAutoBypass({
         .setAuthor({ name: commandName })
         .setTitle('All videos were content violation, try again')
         .setDescription(`>>> ${truncate(prompt, 900)}`)
-        .addFields({ name: 'Settings', value: abSettingsLine(duration, total, modelLabel) })
+        .addFields({ name: 'Settings', value: abSettingsLine(duration, total, modelLabel, settingsExtras) })
         .setFooter({ text: `Requested by ${user.username}`, iconURL: user.displayAvatarURL?.() })
         .setTimestamp());
     } else {
@@ -796,7 +799,7 @@ async function finishAutoBypass({
   for (const c of clips.sort((a, b) => a.i - b.i)) {
     const mb = (c.bytes / MB).toFixed(1);
     try {
-      const link = await uploadToCatbox(c.path, { filename: `autobypass-${c.i + 1}.mp4` });
+      const link = await uploadToLitterbox(c.path, { filename: `autobypass-${c.i + 1}.mp4` });
       await replyToAnchor({ content: `${user} https://x266.mov/e/${link}` });
       delivered += 1;
       console.log(`[autobypass] clip ${c.i + 1}/${clips.length} hosted: ${link} (cut ${c.trimmedOk && c.sceneStart !== null ? c.sceneStart.toFixed(2) + 's' : 'none'})`);
@@ -827,7 +830,7 @@ async function finishAutoBypass({
     .setTitle(delivered ? 'Bypass complete' : 'Bypass failed')
     .setDescription(`>>> ${truncate(prompt, 900)}`)
     .addFields(
-      { name: 'Settings', value: abSettingsLine(duration, total, modelLabel, [`\`${fmtElapsed(Date.now() - startedAt)}\``]) },
+      { name: 'Settings', value: abSettingsLine(duration, total, modelLabel, [...settingsExtras, `\`${fmtElapsed(Date.now() - startedAt)}\``]) },
       { name: 'Delivered', value: `${delivered} of ${total} renders \u2014 links above` },
       { name: 'Trim', value: trimSummary || 'No clips to trim' },
     )
@@ -873,6 +876,10 @@ async function runAutoBypass(interaction) {
     const abDuration = use25 ? 30 : 15;
     const abCount = AB_COUNT;
     const modelLabel = abModelLabel(modelId);
+    // Resolution is a Seedance 2.5-only knob — the 2.0 site has no resolution
+    // control, so the option is ignored there.
+    const abResolution = use25 ? (interaction.options.getString('resolution') ?? '480p') : null;
+    const settingsExtras = abResolution ? [`\`${abResolution}\``] : [];
 
     const { images: imgAtts, error: refError } = collectReferences(
       interaction, ['img1', 'img2', 'img3'], AB_MAX_IMAGES, [], 0,
@@ -888,7 +895,7 @@ async function runAutoBypass(interaction) {
       .setAuthor({ name: commandName })
       .setTitle(`Firing ${abCount} bypass renders`)
       .setDescription(`>>> ${truncate(userPrompt, 900)}`)
-      .addFields({ name: 'Settings', value: abSettingsLine(abDuration, abCount, modelLabel) })
+      .addFields({ name: 'Settings', value: abSettingsLine(abDuration, abCount, modelLabel, settingsExtras) })
       .setFooter({ text: `Requested by ${user.username} \u2022 submitting\u2026`, iconURL: user.displayAvatarURL() })
       .setTimestamp();
     if (refCount) firing.addFields({ name: 'References', value: `${refCount} image${refCount > 1 ? 's' : ''}` });
@@ -912,7 +919,7 @@ async function runAutoBypass(interaction) {
           const { taskId } = await aistudio.createTask({
             prompt: finalPrompt,
             duration: abDuration,
-            resolution: '480P',
+            resolution: abResolution.toUpperCase(),
             ratio: AB_RATIO,
             references,
           });
@@ -950,7 +957,7 @@ async function runAutoBypass(interaction) {
           .setAuthor({ name: commandName })
           .setTitle('All videos were content violation, try again')
           .setDescription(`>>> ${truncate(userPrompt, 900)}`)
-          .addFields({ name: 'Settings', value: abSettingsLine(abDuration, abCount, modelLabel) })
+          .addFields({ name: 'Settings', value: abSettingsLine(abDuration, abCount, modelLabel, settingsExtras) })
           .setFooter({ text: `Requested by ${user.username}`, iconURL: user.displayAvatarURL() })
           .setTimestamp());
       } else {
@@ -979,6 +986,7 @@ async function runAutoBypass(interaction) {
         duration: abDuration,
         model: modelChoice,
         modelId,
+        resolution: abResolution,
         hide: hidePrompt,
         deadlineAt: Date.now() + VIDEO_TIMEOUT,
         createdAt: Date.now(),
@@ -1026,7 +1034,7 @@ async function runAutoBypass(interaction) {
       user, prompt: userPrompt, guild: interaction.guild,
       successes, violations: genViolations, failed: genFailed,
       total: submitted.length, startedAt,
-      duration: abDuration, modelLabel,
+      duration: abDuration, resolution: abResolution, modelLabel,
       finalise, replyToAnchor, localFiles,
     });
   } catch (err) {
@@ -1086,6 +1094,8 @@ async function resumeAutoBypass(rec, { user, prompt, channel, finalise, replyToA
     const recModel = String(rec.model ?? '2.5');
     const recUse25 = !recModel.includes('2-0') && recModel !== '2.0';
     const recClient = recUse25 ? aistudio : ogen;
+    const recResolution = recUse25 ? (rec.resolution ?? '480p') : null;
+    const recSettingsExtras = recResolution ? [`\`${recResolution}\``] : [];
     const successes = [];
     let violations = 0;
     let failed = 0;
@@ -1112,6 +1122,7 @@ async function resumeAutoBypass(rec, { user, prompt, channel, finalise, replyToA
       successes, violations, failed, total: taskIds.length,
       startedAt: rec.createdAt ?? Date.now(),
       duration: rec.duration ?? (recUse25 ? 30 : AB_DURATION),
+      resolution: recResolution,
       modelLabel: abModelLabel(recUse25 ? AISTUDIO_MODEL_25 : OPENGEN_MODEL),
       finalise, replyToAnchor, localFiles,
     });

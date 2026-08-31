@@ -39,11 +39,13 @@ A single-server Discord bot: `/flux-3`, `/sd2`, `/sd2-5`, `/wan-3` and `/autobyp
 `/autobypass` — fires N renders (from `AUTOBYPASS_COUNT` in .env) of the prompt
 template with `videointro.mov` attached as the reference video, trims the intro
 off every render, then replies to the initial message with one embeddable link
-per clip (hosted on catbox.moe, wrapped through x266.mov so Discord plays them
-inline).
+per clip (hosted on Litterbox (catbox) for 72h, wrapped through x266.mov so
+Discord plays them inline).
 - `prompt` (required) — the scene the video should cut to after the intro
 - `model` — Seedance 2.5 (default, 30s, AI Studio site) or Seedance 2.0 (15s,
   open generation site)
+- `resolution` — 480p (default), 720p (Seedance 2.5 only; 2.0 has no
+  resolution control and the option is ignored there)
 - `img1`–`img3` — optional reference images (passed as references)
 - If every render is a content violation: "All videos were content violation,
   try again".
