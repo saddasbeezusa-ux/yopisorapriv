@@ -117,15 +117,21 @@ export class AiStudioClient {
       else content.push({ type: 'image_url', image_url: { url: r.url }, role: 'reference_image' });
     }
 
+    // The route IGNORES the flat Duration/Resolution/AspectRatio params (verified
+    // live: flat-only 30s t2v still returns 5s). The nested OutputConfig wrapper
+    // is what actually carries them — verified 30.08s @ 854x480 through it.
     const body = {
       ModelName: this.#model.name,
       ModelVersion: this.#model.version,
       Prompt: prompt,
       content,
-      Duration: Number(duration),
-      AspectRatio: String(ratio),
-      Resolution: String(resolution).toUpperCase(),
-      AudioGeneration: 'Enabled',
+      OutputConfig: {
+        StorageMode: 'Permanent',
+        Duration: Number(duration),
+        Resolution: String(resolution).toUpperCase(),
+        AspectRatio: String(ratio),
+        AudioGeneration: 'Enabled',
+      },
     };
 
     let lastErr = null;
@@ -144,7 +150,7 @@ export class AiStudioClient {
       let data = null; try { data = JSON.parse(resp.text); } catch { /* */ }
 
       if (resp.status === 200 && data?.TaskId) {
-        console.log(`[aistudio.createTask] accepted: ${data.TaskId} (${references.filter((r) => r.type === 'image').length} img, ${references.filter((r) => r.type === 'video').length} vid refs, ${body.Duration}s ${body.Resolution})`);
+        console.log(`[aistudio.createTask] accepted: ${data.TaskId} (${references.filter((r) => r.type === 'image').length} img, ${references.filter((r) => r.type === 'video').length} vid refs, ${body.OutputConfig.Duration}s ${body.OutputConfig.Resolution})`);
         return { taskId: data.TaskId };
       }
 
