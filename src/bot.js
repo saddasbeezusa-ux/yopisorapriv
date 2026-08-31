@@ -41,6 +41,7 @@ import {
   SD25_MAX_VIDEOS,
 } from './sd2.js';
 import { OpenGenClient, OpenGenError, OPENGEN_MODEL } from './opengen.js';
+import { AiStudioClient, AiStudioError, AISTUDIO_MODEL_25, AISTUDIO_MODEL_20 } from './aistudio.js';
 import { analyzeVideo, trimVideo, ensureMinDuration, AutoBypassError } from './autobypass.js';
 import {
   WanClient,
@@ -76,6 +77,7 @@ const sd2 = new SeedanceClient({ model: SD2_MODEL });
 const sd25 = new SeedanceClient({ model: SD25_MODEL });
 const wan = new WanClient();
 const ogen = new OpenGenClient();
+const aistudio = new AiStudioClient();
 const jobStore = createJobStore({ dir: process.env.GEN_JOB_STORE_DIR || './.jobs' });
 
 const safeUnlink = (p) => (p ? unlink(p).catch(() => {}) : Promise.resolve());
@@ -667,8 +669,10 @@ const abModelLabel = (modelId) => (String(modelId).includes('2-5') ? 'Seedance 2
 const abSettingsLine = (duration, count, modelLabel, extra = []) =>
   [`\`${duration}s\``, `\`${AB_RATIO}\``, `\`${count} render${count === 1 ? '' : 's'}\``, `\`${modelLabel}\``, ...extra].join(' \u2022 ');
 
-// The intro clip padded to the provider's r2v minimum (1.8s), then uploaded to
-// the provider once per process â€” every render references that hosted copy.
+// The intro clip padded to the provider's r2v minimum (1.8s), then hosted once
+// per process — every render references that public copy.
+// - Seedance 2.5 (AI Studio): catbox URL, referenced directly
+// - Seedance 2.0 (open site): uploaded to the site, referenced by hosted URL
 let abRefStoredFile = null;
 let abRefUploadPromise = null;
 async function ensureRefStoredFile() {
@@ -688,6 +692,26 @@ async function ensureRefStoredFile() {
     })().catch((err) => { abRefUploadPromise = null; throw err; });
   }
   return abRefUploadPromise;
+}
+
+let abRefVideoUrl25 = null;
+let abRefVideoPromise25 = null;
+async function ensureRefVideoUrl25() {
+  if (abRefVideoUrl25) return abRefVideoUrl25;
+  if (!abRefVideoPromise25) {
+    abRefVideoPromise25 = (async () => {
+      const padded = await ensureMinDuration(AB_INTRO_PATH, 1.8);
+      try {
+        const link = await uploadToCatbox(padded, { filename: 'videointro.mov' });
+        abRefVideoUrl25 = link;
+        console.log(`[autobypass] intro clip hosted for 2.5 renders: ${link}`);
+        return link;
+      } finally {
+        if (padded !== AB_INTRO_PATH) await unlink(padded).catch(() => {});
+      }
+    })().catch((err) => { abRefVideoPromise25 = null; throw err; });
+  }
+  return abRefVideoPromise25;
 }
 
 // Shared tail for /autobypass: judge every downloaded render, trim the intro
@@ -842,8 +866,11 @@ async function runAutoBypass(interaction) {
 
   try {
     const userPrompt = interaction.options.getString('prompt', true);
-    const modelId = OPENGEN_MODEL;
-    const abDuration = AB_DURATION;
+    const modelChoice = interaction.options.getString('model') ?? '2.5';
+    const use25 = modelChoice === '2.5';
+    const client = use25 ? aistudio : ogen;
+    const modelId = use25 ? AISTUDIO_MODEL_25 : OPENGEN_MODEL;
+    const abDuration = use25 ? 30 : 15;
     const abCount = AB_COUNT;
     const modelLabel = abModelLabel(modelId);
 
@@ -869,28 +896,52 @@ async function runAutoBypass(interaction) {
     const anchor = await createAnchor(firing);
 
     const finalPrompt = AB_PROMPT_TEMPLATE(userPrompt);
-    const refStored = await ensureRefStoredFile();
 
     const submitted = [];
     let submitBlocked = 0;
     let submitFailed = 0;
 
-    await runPool(abCount, AB_SUBMIT_CONCURRENCY, async (i) => {
-      try {
-        const { taskId } = await ogen.createTask({
-          prompt: finalPrompt,
-          duration: abDuration,
-          ratio: AB_RATIO,
-          images: imgAtts ?? [],
-          videos: [refStored],
-        });
-        submitted.push({ i, taskId });
-      } catch (err) {
-        if (err?.blocked) submitBlocked += 1;
-        else submitFailed += 1;
-        console.error(`[autobypass] submit ${i + 1}/${abCount} failed: ${err?.message ?? err}`);
-      }
-    });
+    if (use25) {
+      const refVideoUrl = await ensureRefVideoUrl25();
+      const references = [
+        { type: 'video', url: refVideoUrl },
+        ...(imgAtts ?? []).map((a) => ({ type: 'image', url: a.url })),
+      ];
+      await runPool(abCount, AB_SUBMIT_CONCURRENCY, async (i) => {
+        try {
+          const { taskId } = await aistudio.createTask({
+            prompt: finalPrompt,
+            duration: abDuration,
+            resolution: '480P',
+            ratio: AB_RATIO,
+            references,
+          });
+          submitted.push({ i, taskId });
+        } catch (err) {
+          if (err?.blocked) submitBlocked += 1;
+          else submitFailed += 1;
+          console.error(`[autobypass] submit ${i + 1}/${abCount} failed: ${err?.message ?? err}`);
+        }
+      });
+    } else {
+      const refStored = await ensureRefStoredFile();
+      await runPool(abCount, AB_SUBMIT_CONCURRENCY, async (i) => {
+        try {
+          const { taskId } = await ogen.createTask({
+            prompt: finalPrompt,
+            duration: abDuration,
+            ratio: AB_RATIO,
+            images: imgAtts ?? [],
+            videos: [refStored],
+          });
+          submitted.push({ i, taskId });
+        } catch (err) {
+          if (err?.blocked) submitBlocked += 1;
+          else submitFailed += 1;
+          console.error(`[autobypass] submit ${i + 1}/${abCount} failed: ${err?.message ?? err}`);
+        }
+      });
+    }
 
     if (!submitted.length) {
       if (submitBlocked >= abCount) {
@@ -926,7 +977,8 @@ async function runAutoBypass(interaction) {
         submittedCount: submitted.length,
         count: abCount,
         duration: abDuration,
-        model: modelId,
+        model: modelChoice,
+        modelId,
         hide: hidePrompt,
         deadlineAt: Date.now() + VIDEO_TIMEOUT,
         createdAt: Date.now(),
@@ -956,10 +1008,10 @@ async function runAutoBypass(interaction) {
     await runPool(submitted.length, AB_DELIVER_CONCURRENCY, async (idx) => {
       const item = submitted[idx];
       try {
-        const { videoUrl } = await ogen.waitForTask(item.taskId, {
+        const { videoUrl } = await client.waitForTask(item.taskId, {
           intervalMs: POLL_MS, timeoutMs: VIDEO_TIMEOUT, onUpdate: () => {},
         });
-        const file = await ogen.downloadTaskResult(item.taskId, { firstUrl: videoUrl });
+        const file = await client.downloadTaskResult(item.taskId, { firstUrl: videoUrl });
         localFiles.push(file.path);
         successes.push({ i: item.i, path: file.path, bytes: file.bytes });
         console.log(`[autobypass] ${item.taskId} (${item.i + 1}/${submitted.length}) rendered (${(file.bytes / MB).toFixed(1)} MB)`);
@@ -1029,6 +1081,11 @@ async function resumeAutoBypass(rec, { user, prompt, channel, finalise, replyToA
     } catch { /* cosmetic */ }
 
     const taskIds = rec.taskIds ?? [];
+    // rec.model is '2.5' | '2.0' for new records; older records carry the full
+    // model id string — match both.
+    const recModel = String(rec.model ?? '2.5');
+    const recUse25 = !recModel.includes('2-0') && recModel !== '2.0';
+    const recClient = recUse25 ? aistudio : ogen;
     const successes = [];
     let violations = 0;
     let failed = 0;
@@ -1036,10 +1093,10 @@ async function resumeAutoBypass(rec, { user, prompt, channel, finalise, replyToA
     await runPool(taskIds.length, AB_DELIVER_CONCURRENCY, async (idx) => {
       const taskId = taskIds[idx];
       try {
-        const { videoUrl } = await ogen.waitForTask(taskId, {
+        const { videoUrl } = await recClient.waitForTask(taskId, {
           intervalMs: POLL_MS, timeoutMs: remaining, onUpdate: () => {},
         });
-        const file = await ogen.downloadTaskResult(taskId, { firstUrl: videoUrl });
+        const file = await recClient.downloadTaskResult(taskId, { firstUrl: videoUrl });
         localFiles.push(file.path);
         successes.push({ i: idx, path: file.path, bytes: file.bytes });
         console.log(`[autobypass-resume] ${taskId} (${idx + 1}/${taskIds.length}) rendered`);
@@ -1054,8 +1111,8 @@ async function resumeAutoBypass(rec, { user, prompt, channel, finalise, replyToA
       user: resumeRef, prompt, guild: channel.guild ?? null,
       successes, violations, failed, total: taskIds.length,
       startedAt: rec.createdAt ?? Date.now(),
-      duration: rec.duration ?? AB_DURATION,
-      modelLabel: abModelLabel(rec.model ?? OPENGEN_MODEL),
+      duration: rec.duration ?? (recUse25 ? 30 : AB_DURATION),
+      modelLabel: abModelLabel(recUse25 ? AISTUDIO_MODEL_25 : OPENGEN_MODEL),
       finalise, replyToAnchor, localFiles,
     });
   } catch (err) {

@@ -172,6 +172,13 @@ const autobypassBuilder = new SlashCommandBuilder()
   .addStringOption((o) =>
     o.setName('prompt').setDescription('The scene the video should cut to after the intro').setRequired(true).setMaxLength(3000),
   )
+  .addStringOption((o) =>
+    o.setName('model').setDescription('Which Seedance model to render with (default 2.5)')
+      .addChoices(
+        { name: 'Seedance 2.5 (default)', value: '2.5' },
+        { name: 'Seedance 2.0', value: '2.0' },
+      ),
+  )
   .addAttachmentOption((o) => o.setName('img1').setDescription(`Reference image (optional, up to 3) \u2014 passed as a reference, not a first frame`))
   .addAttachmentOption((o) => o.setName('img2').setDescription('A second reference image (optional)'))
   .addAttachmentOption((o) => o.setName('img3').setDescription('A third reference image (optional)'))
