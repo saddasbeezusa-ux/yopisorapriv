@@ -55,7 +55,7 @@ import {
 } from './wan.js';
 import { createSlotManager } from './slots.js';
 import { createJobStore } from './jobstore.js';
-import { uploadToSatoru } from './satoru.js';
+import { uploadToPone } from './pone.js';
 
 const {
   DISCORD_TOKEN,
@@ -91,18 +91,18 @@ const safeUnlink = (p) => (p ? unlink(p).catch(() => {}) : Promise.resolve());
 const markJobDelivered = (jobId, kind = 'wan') =>
   jobStore.save({ jobId, kind, delivered: true, deliveredAt: Date.now() }).catch(() => {});
 
-// Over the server upload limit: host the video on upload.satoru.click and reply with a
-// bare embeddable link (x266 wraps the satoru URL so Discord plays it inline).
+// Over the server upload limit: host the video on pone.rs and reply with a
+// bare embeddable link (x266 wraps the pone URL so Discord plays it inline).
 // Returns true when the link was sent; false when the upload failed (the
 // caller then falls back to the plain over-limit notice).
 async function deliverOverLimitReply(replyToAnchor, { mention, file, limit }) {
   try {
-    const link = await uploadToSatoru(file.path, { filename: 'video.mp4' });
+    const link = await uploadToPone(file.path, { filename: 'video.mp4' });
     await replyToAnchor({ content: `https://x266.mov/e/${link}` });
-    console.log(`[satoru] over-limit video hosted: ${link}`);
+    console.log(`[pone] over-limit video hosted: ${link}`);
     return true;
   } catch (err) {
-    console.error(`[satoru] upload failed: ${err?.message ?? err}`);
+    console.error(`[pone] upload failed: ${err?.message ?? err}`);
     return false;
   }
 }
@@ -673,7 +673,7 @@ const abSettingsLine = (duration, count, modelLabel, extra = []) =>
 
 // The intro clip padded to the provider's r2v minimum (1.8s), then hosted once
 // per process — every render references that public copy.
-// - Seedance 2.5 (AI Studio): satoru URL, referenced directly
+// - Seedance 2.5 (AI Studio): pone URL, referenced directly
 // - Seedance 2.0 (open site): uploaded to the site, referenced by hosted URL
 let abRefStoredFile = null;
 let abRefUploadPromise = null;
@@ -710,7 +710,7 @@ async function ensureRefVideoUrl25() {
       try {
         // The padded clip is H.264/AAC, so it
         // rides as .mp4 (players and ARK probe the container anyway).
-        const link = await uploadToSatoru(padded, { filename: 'videointro.mp4', contentType: 'video/mp4' });
+        const link = await uploadToPone(padded, { filename: 'videointro.mp4', contentType: 'video/mp4' });
         abRefVideoUrl25 = link;
         console.log(`[autobypass] intro clip hosted for 2.5 renders: ${link}`);
         return link;
@@ -723,7 +723,7 @@ async function ensureRefVideoUrl25() {
 }
 
 // Shared tail for /autobypass: judge every downloaded render, trim the intro
-// off each one, upload to satoru and reply to the initial message with one
+// off each one, upload to pone and reply to the initial message with one
 // embeddable link per clip. Used by both the fresh run and restart-resume.
 async function finishAutoBypass({
   user, prompt, guild, successes, violations, failed, total, startedAt,
@@ -805,15 +805,15 @@ async function finishAutoBypass({
   for (const c of clips.sort((a, b) => a.i - b.i)) {
     const mb = (c.bytes / MB).toFixed(1);
     try {
-      const link = await uploadToSatoru(c.path, { filename: `autobypass-${c.i + 1}.mp4` });
+      const link = await uploadToPone(c.path, { filename: `autobypass-${c.i + 1}.mp4` });
       await replyToAnchor({ content: `${user} https://x266.mov/e/${link}` });
       delivered += 1;
       console.log(`[autobypass] clip ${c.i + 1}/${clips.length} hosted: ${link} (cut ${c.trimmedOk && c.sceneStart !== null ? c.sceneStart.toFixed(2) + 's' : 'none'})`);
       continue;
     } catch (err) {
-      console.error(`[autobypass] clip ${c.i + 1} satoru upload failed: ${err?.message ?? err}`);
+      console.error(`[autobypass] clip ${c.i + 1} pone upload failed: ${err?.message ?? err}`);
     }
-    // satoru failed â€” attach the file if it fits the server limit.
+    // pone failed â€” attach the file if it fits the server limit.
     if (c.bytes < limit) {
       try {
         await replyToAnchor({ content: `${user}`, files: [new AttachmentBuilder(createReadStream(c.path), { name: `autobypass-${c.i + 1}.mp4` })] });
@@ -917,8 +917,8 @@ async function runAutoBypass(interaction) {
     if (use25) {
       const refVideoUrl = await ensureRefVideoUrl25();
       // Discord CDN URLs are GFW-blocked — the upstream (ARK, cn-beijing) cannot
-      // fetch user attachments directly. Re-host every ref image on satoru
-      // (verified reachable: satoru-hosted refs render, Discord URLs do not).
+      // fetch user attachments directly. Re-host every ref image on pone
+      // (verified reachable: pone-hosted refs render, Discord URLs do not).
       const refTemps = [];
       try {
         const references = [{ type: 'video', url: refVideoUrl }];
@@ -937,7 +937,7 @@ async function runAutoBypass(interaction) {
           const tmp = join(tmpdir(), `ab-ref-${randomBytes(8).toString('hex')}.${ext}`);
           await writeFile(tmp, bytes);
           refTemps.push(tmp);
-          const hosted = await uploadToSatoru(tmp, { filename: `ref${refTemps.length}.${ext === 'jpg' ? 'jpg' : ext}`, contentType: a.contentType || 'image/jpeg' });
+          const hosted = await uploadToPone(tmp, { filename: `ref${refTemps.length}.${ext === 'jpg' ? 'jpg' : ext}`, contentType: a.contentType || 'image/jpeg' });
           references.push({ type: 'image', url: hosted });
         }
         await runPool(abCount, AB_SUBMIT_CONCURRENCY, async (i) => {
