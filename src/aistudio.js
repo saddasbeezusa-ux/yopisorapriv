@@ -110,12 +110,13 @@ export class AiStudioClient {
 
   // ─── Create task ───────────────────────────────────────────────────────────
   // references: [{ type: 'video'|'image', url }] — public URLs only.
+  // Refs MUST ride in the flat ReferenceImages/ReferenceVideos fields — the
+  // raw ARK content array is silently dropped by this route (verified live:
+  // content-array ref image produced zero influence on the output, flat-refs
+  // style shows the image strongly in every frame after the intro cut).
   async createTask({ prompt, duration, resolution = '480P', ratio, references = [] }) {
-    const content = [{ type: 'text', text: prompt }];
-    for (const r of references) {
-      if (r.type === 'video') content.push({ type: 'video_url', video_url: { url: r.url }, role: 'reference_video' });
-      else content.push({ type: 'image_url', image_url: { url: r.url }, role: 'reference_image' });
-    }
+    const referenceImages = references.filter((r) => r.type === 'image').map((r) => ({ Type: 'URL', Url: r.url }));
+    const referenceVideos = references.filter((r) => r.type === 'video').map((r) => ({ Type: 'URL', Url: r.url }));
 
     // The route IGNORES the flat Duration/Resolution/AspectRatio params (verified
     // live: flat-only 30s t2v still returns 5s). The nested OutputConfig wrapper
@@ -124,7 +125,8 @@ export class AiStudioClient {
       ModelName: this.#model.name,
       ModelVersion: this.#model.version,
       Prompt: prompt,
-      content,
+      ReferenceImages: referenceImages,
+      ReferenceVideos: referenceVideos,
       OutputConfig: {
         StorageMode: 'Permanent',
         Duration: Number(duration),
