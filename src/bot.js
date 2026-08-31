@@ -13,7 +13,9 @@ import {
   ActionRowBuilder,
 } from 'discord.js';
 import { createReadStream } from 'node:fs';
-import { unlink, stat } from 'node:fs/promises';
+import { unlink, stat, writeFile } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import {
@@ -910,26 +912,49 @@ async function runAutoBypass(interaction) {
 
     if (use25) {
       const refVideoUrl = await ensureRefVideoUrl25();
-      const references = [
-        { type: 'video', url: refVideoUrl },
-        ...(imgAtts ?? []).map((a) => ({ type: 'image', url: a.url })),
-      ];
-      await runPool(abCount, AB_SUBMIT_CONCURRENCY, async (i) => {
-        try {
-          const { taskId } = await aistudio.createTask({
-            prompt: finalPrompt,
-            duration: abDuration,
-            resolution: abResolution.toUpperCase(),
-            ratio: AB_RATIO,
-            references,
-          });
-          submitted.push({ i, taskId });
-        } catch (err) {
-          if (err?.blocked) submitBlocked += 1;
-          else submitFailed += 1;
-          console.error(`[autobypass] submit ${i + 1}/${abCount} failed: ${err?.message ?? err}`);
+      // Discord CDN URLs are GFW-blocked — the upstream (ARK, cn-beijing) cannot
+      // fetch user attachments directly. Re-host every ref image on Litterbox
+      // (verified reachable: litterbox-hosted refs render, Discord URLs do not).
+      const refTemps = [];
+      try {
+        const references = [{ type: 'video', url: refVideoUrl }];
+        for (const a of (imgAtts ?? [])) {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 60_000);
+          let bytes;
+          try {
+            const resp = await fetch(a.url, { signal: ctrl.signal });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching attachment`);
+            bytes = Buffer.from(await resp.arrayBuffer());
+          } finally {
+            clearTimeout(timer);
+          }
+          const ext = (a.name || 'ref.jpg').match(/\.([a-z0-9]{2,5})$/i)?.[1]?.toLowerCase() ?? 'jpg';
+          const tmp = join(tmpdir(), `ab-ref-${randomBytes(8).toString('hex')}.${ext}`);
+          await writeFile(tmp, bytes);
+          refTemps.push(tmp);
+          const hosted = await uploadToLitterbox(tmp, { filename: `ref${refTemps.length}.${ext === 'jpg' ? 'jpg' : ext}`, contentType: a.contentType || 'image/jpeg' });
+          references.push({ type: 'image', url: hosted });
         }
-      });
+        await runPool(abCount, AB_SUBMIT_CONCURRENCY, async (i) => {
+          try {
+            const { taskId } = await aistudio.createTask({
+              prompt: finalPrompt,
+              duration: abDuration,
+              resolution: abResolution.toUpperCase(),
+              ratio: AB_RATIO,
+              references,
+            });
+            submitted.push({ i, taskId });
+          } catch (err) {
+            if (err?.blocked) submitBlocked += 1;
+            else submitFailed += 1;
+            console.error(`[autobypass] submit ${i + 1}/${abCount} failed: ${err?.message ?? err}`);
+          }
+        });
+      } finally {
+        for (const p of refTemps.splice(0)) await safeUnlink(p);
+      }
     } else {
       const refStored = await ensureRefStoredFile();
       await runPool(abCount, AB_SUBMIT_CONCURRENCY, async (i) => {
