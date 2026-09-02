@@ -224,8 +224,13 @@ export class GlimClient {
       if (status === 'failed') {
         const rawMsg = task?.error ?? 'Generation failed.';
         console.error(`[glim.waitForTask] task ${taskId} failed: ${String(rawMsg).slice(0, 400)}`);
+        // This backend collapses ARK moderation failures into a bare
+        // "视频生成失败" (video generation failed) — treat that generic string
+        // as a content violation (copyright/safety blocks always land here).
+        const generic = /^视频生成失败/.test(String(rawMsg).trim());
         throw new GlimError(userMessage(rawMsg, 'Generation failed. Please try again.'), {
-          body: task, blocked: BLOCK_RE.test(String(rawMsg)),
+          body: task,
+          blocked: generic || BLOCK_RE.test(String(rawMsg)),
         });
       }
       if (!ACTIVE_STATUSES.has(status) && status) {
