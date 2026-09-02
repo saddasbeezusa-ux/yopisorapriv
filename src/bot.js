@@ -1,4 +1,4 @@
-﻿import 'dotenv/config';
+import 'dotenv/config';
 import {
   Client,
   GatewayIntentBits,
@@ -43,7 +43,7 @@ import {
   SD25_MAX_VIDEOS,
 } from './sd2.js';
 import { OpenGenClient, OpenGenError, OPENGEN_MODEL } from './opengen.js';
-import { AiStudioClient, AiStudioError, AISTUDIO_MODEL_25, AISTUDIO_MODEL_20 } from './aistudio.js';
+import { GlimClient, GlimError, GLIM_MODEL } from './glim.js';
 import { analyzeVideo, trimVideo, ensureMinDuration, AutoBypassError } from './autobypass.js';
 import {
   WanClient,
@@ -79,7 +79,7 @@ const sd2 = new SeedanceClient({ model: SD2_MODEL });
 const sd25 = new SeedanceClient({ model: SD25_MODEL });
 const wan = new WanClient();
 const ogen = new OpenGenClient();
-const aistudio = new AiStudioClient();
+const glim = new GlimClient();
 const jobStore = createJobStore({ dir: process.env.GEN_JOB_STORE_DIR || './.jobs' });
 
 const safeUnlink = (p) => (p ? unlink(p).catch(() => {}) : Promise.resolve());
@@ -877,8 +877,8 @@ async function runAutoBypass(interaction) {
     const userPrompt = interaction.options.getString('prompt', true);
     const modelChoice = interaction.options.getString('model') ?? '2.5';
     const use25 = modelChoice === '2.5';
-    const client = use25 ? aistudio : ogen;
-    const modelId = use25 ? AISTUDIO_MODEL_25 : OPENGEN_MODEL;
+    const client = use25 ? glim : ogen;
+    const modelId = use25 ? GLIM_MODEL : OPENGEN_MODEL;
     const abDuration = use25 ? 30 : 15;
     const abCount = AB_COUNT;
     const modelLabel = abModelLabel(modelId);
@@ -942,7 +942,7 @@ async function runAutoBypass(interaction) {
         }
         await runPool(abCount, AB_SUBMIT_CONCURRENCY, async (i) => {
           try {
-            const { taskId } = await aistudio.createTask({
+            const { taskId } = await glim.createTask({
               prompt: finalPrompt,
               duration: abDuration,
               resolution: abResolution.toUpperCase(),
@@ -1122,7 +1122,7 @@ async function resumeAutoBypass(rec, { user, prompt, channel, finalise, replyToA
     // model id string — match both.
     const recModel = String(rec.model ?? '2.5');
     const recUse25 = !recModel.includes('2-0') && recModel !== '2.0';
-    const recClient = recUse25 ? aistudio : ogen;
+    const recClient = recUse25 ? glim : ogen;
     const recResolution = recUse25 ? (rec.resolution ?? '480p') : null;
     const recSettingsExtras = recResolution ? [`\`${recResolution}\``] : [];
     const successes = [];
@@ -1152,7 +1152,7 @@ async function resumeAutoBypass(rec, { user, prompt, channel, finalise, replyToA
       startedAt: rec.createdAt ?? Date.now(),
       duration: rec.duration ?? (recUse25 ? 30 : AB_DURATION),
       resolution: recResolution,
-      modelLabel: abModelLabel(recUse25 ? AISTUDIO_MODEL_25 : OPENGEN_MODEL),
+      modelLabel: abModelLabel(recUse25 ? GLIM_MODEL : OPENGEN_MODEL),
       finalise, replyToAnchor, localFiles,
     });
   } catch (err) {
